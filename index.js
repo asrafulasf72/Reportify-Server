@@ -27,8 +27,35 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+
+    //  Create database + collections
+    const db = client.db("ReportifyDB")
+    const usersCollection=db.collection("users")
+
+
+
+    // USers API Here 
+    app.post('/users', async(req,res)=>{
+      const user=req.body;
+      user.role='citizen';
+      user.subscription='free'
+      user.createdAt = new Date().toISOString();
+      const email=user.email;
+
+      const userExist= await usersCollection.findOne({email})
+      if(userExist){
+         return res.send({ exists: true, message: 'User Already Exist' });
+      }
+
+      const result= await usersCollection.insertOne(user)
+      res.send(result)
+    })
+
+
+
+
+      // Send a ping to confirm a successful connection
+      await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
