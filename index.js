@@ -1,8 +1,11 @@
 const express = require('express')
 const cors = require('cors')
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-
 require('dotenv').config()
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
+
+
 const app = express()
 const port = process.env.PORT || 3000
 
@@ -62,24 +65,24 @@ async function run() {
     })
 
     // Update User API
-    app.patch('/users/update/:email', async(req,res)=>{
-      const email=req.params.email
-      const {displayName, photoURL}=req.body
+    app.patch('/users/update/:email', async (req, res) => {
+      const email = req.params.email
+      const { displayName, photoURL } = req.body
 
-      const updateDoc={
-        $set:{
-          displayName:displayName,
-          photoURL:photoURL
+      const updateDoc = {
+        $set: {
+          displayName: displayName,
+          photoURL: photoURL
         }
       }
 
-      const result= await usersCollection.updateOne({email}, updateDoc)
+      const result = await usersCollection.updateOne({ email }, updateDoc)
       res.send(result)
     })
 
     /****************************************************************************************/
     /*Issues Related API*/
-                  
+
     // Issues Post Api here
     app.post('/issues', async (req, res) => {
       const { title, description, category, location, image, email } = req.body;
@@ -197,6 +200,57 @@ async function run() {
     });
 
 
+    /****************************************************************************************/
+    // Payment Related API here
+
+    app.post('/create-checkout-session', async (req, res) => {
+      const paymentInfo=req.body
+      const amount=parseInt(paymentInfo.cost)*100
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data:{
+              currency: "bdt",
+              unit_amount:amount,
+              product_data:{
+                name: "Premium Subscription",
+                description: "Unlimited Issue Submission",
+              }
+              
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        customer_email:paymentInfo.email,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success/?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-canceled`,
+      });
+      res.send({ url: session.url });
+    });
+
+app.post("/payment-success", async (req, res) => {
+  const { sessionId } = req.body;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status === "paid") {
+      const email = session.customer_email;
+
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: { isPremium: true } }
+      );
+
+      res.send({ success: true });
+    } else {
+      res.status(400).send({ success: false });
+    }
+  } catch (error) {
+    res.status(500).send({ error: "Payment verification failed" });
+  }
+});
 
 
 
