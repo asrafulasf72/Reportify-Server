@@ -54,13 +54,32 @@ async function run() {
       const result = await usersCollection.insertOne(user)
       res.send(result)
     })
-
+    // Get User API
     app.get('/users/:email', async (req, res) => {
       const email = req.params.email
       const result = await usersCollection.findOne({ email })
       res.send(result)
     })
 
+    // Update User API
+    app.patch('/users/update/:email', async(req,res)=>{
+      const email=req.params.email
+      const {displayName, photoURL}=req.body
+
+      const updateDoc={
+        $set:{
+          displayName:displayName,
+          photoURL:photoURL
+        }
+      }
+
+      const result= await usersCollection.updateOne({email}, updateDoc)
+      res.send(result)
+    })
+
+    /****************************************************************************************/
+    /*Issues Related API*/
+                  
     // Issues Post Api here
     app.post('/issues', async (req, res) => {
       const { title, description, category, location, image, email } = req.body;
