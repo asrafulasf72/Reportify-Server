@@ -39,8 +39,9 @@ async function run() {
     // USers API Here 
     app.post('/users', async (req, res) => {
       const user = req.body;
-      user.role = 'citizen'
-      user.subscription = 'free'
+      user.role = 'citizen';
+      user.isPremium = false;
+      user.isBlocked = false;
       user.issueCount = 0;
       user.createdAt = new Date().toISOString();
       const email = user.email;
@@ -65,8 +66,11 @@ async function run() {
       const { title, description, category, location, image, email } = req.body;
 
       const user = await usersCollection.findOne({ email });
-      if (user.subscription === "free" && user.issueCount >= 3) {
-        return res.status(403).send({ message: "Limit reached" });
+
+      if (!user.isPremium && user.issueCount >= 3) {
+        return res.status(403).send({
+          message: "Free users can submit only 3 issues. Upgrade to premium."
+        });
       }
       const issue = {
         title: title,
@@ -117,7 +121,7 @@ async function run() {
         _id: new ObjectId(id),
       });
 
-      // ❌ Only pending issues editable
+      // Only pending issues editable
       if (issue.status !== "pending") {
         return res.status(403).send({ message: "Cannot edit this issue" });
       }
@@ -127,7 +131,7 @@ async function run() {
         { $set: updatedData }
       );
 
-      // 🧾 Timeline
+      //  Timeline
       await issueTimelineCollaction.insertOne({
         issueId: new ObjectId(id),
         email: issue.email,
