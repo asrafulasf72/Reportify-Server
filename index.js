@@ -4,11 +4,14 @@ require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 
-
-
 const app = express()
 const port = process.env.PORT || 3000
 
+const admin = require("firebase-admin");
+const serviceAccount = require("./reportify-firebase-adminsdk.json");
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 
 
@@ -17,6 +20,23 @@ const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_Password}@myf
 //middleware
 app.use(cors())
 app.use(express.json())
+
+const verifyFirebaseToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization
+
+  if (!authHeader) {
+    return res.status(401).send({ message: 'Unauthorized' })
+  }
+
+  try {
+    const token = authHeader.split(' ')[1]
+    const decoded = await admin.auth().verifyIdToken(token)
+    req.decodedEmail = decoded.email
+    next()
+  } catch (error) {
+    return res.status(401).send({ message: 'Invalid token' })
+  }
+}
 
 
 const client = new MongoClient(uri, {
@@ -58,15 +78,21 @@ async function run() {
       res.send(result)
     })
     // Get User API
-    app.get('/users/:email', async (req, res) => {
+    app.get('/users/:email', verifyFirebaseToken, async (req, res) => {
       const email = req.params.email
+      if (email !== req.decodedEmail) {
+        return res.status(403).send({ message: 'Forbidden access' })
+      }
       const result = await usersCollection.findOne({ email })
       res.send(result)
     })
 
     // Update User API
-    app.patch('/users/update/:email', async (req, res) => {
+    app.patch('/users/update/:email', verifyFirebaseToken, async (req, res) => {
       const email = req.params.email
+      if (email !== req.decodedEmail) {
+        return res.status(403).send({ message: 'Forbidden access' })
+      }
       const { displayName, photoURL } = req.body
 
       const updateDoc = {
@@ -84,9 +110,12 @@ async function run() {
     /*Issues Related API*/
 
     // Issues Post Api here
-    app.post('/issues', async (req, res) => {
+    app.post('/issues', verifyFirebaseToken, async (req, res) => {
       const { title, description, category, location, image, email } = req.body;
 
+      if (email !== req.decodedEmail) {
+        return res.status(403).send({ message: 'Forbidden' })
+      }
       const user = await usersCollection.findOne({ email });
 
       if (!user.isPremium && user.issueCount >= 3) {
@@ -126,8 +155,11 @@ async function run() {
 
     // Issue Get API
 
-    app.get('/issues/:email', async (req, res) => {
+    app.get('/issues/:email', verifyFirebaseToken, async (req, res) => {
       const email = req.params.email
+      if (email !== req.decodedEmail) {
+        return res.status(403).send({ message: 'Forbidden access' })
+      }
       const cursor = issuesCollaction.find({ email }).sort({ createdAt: -1 })
       const result = await cursor.toArray()
       res.send(result)
@@ -167,7 +199,7 @@ async function run() {
 
 
     // Delete Issues API here
-    app.delete("/issues/:id", async (req, res) => {
+    app.delete("/issues/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
 
@@ -177,7 +209,9 @@ async function run() {
       if (!issue) {
         return res.status(404).send({ message: "Issue not found" });
       }
-
+      if (issue.email !== req.decodedEmail) {
+        return res.status(403).send({ message: "Forbidden" })
+      }
       //  Delete the issue
       const deleteIssueResult = await issuesCollaction.deleteOne(query);
 
@@ -204,53 +238,53 @@ async function run() {
     // Payment Related API here
 
     app.post('/create-checkout-session', async (req, res) => {
-      const paymentInfo=req.body
-      const amount=parseInt(paymentInfo.cost)*100
+      const paymentInfo = req.body
+      const amount = parseInt(paymentInfo.cost) * 100
       const session = await stripe.checkout.sessions.create({
         line_items: [
           {
-            price_data:{
+            price_data: {
               currency: "bdt",
-              unit_amount:amount,
-              product_data:{
+              unit_amount: amount,
+              product_data: {
                 name: "Premium Subscription",
                 description: "Unlimited Issue Submission",
               }
-              
+
             },
             quantity: 1,
           },
         ],
         mode: 'payment',
-        customer_email:paymentInfo.email,
+        customer_email: paymentInfo.email,
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success/?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-canceled`,
       });
       res.send({ url: session.url });
     });
 
-app.post("/payment-success", async (req, res) => {
-  const { sessionId } = req.body;
+    app.post("/payment-success", async (req, res) => {
+      const { sessionId } = req.body;
 
-  try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    if (session.payment_status === "paid") {
-      const email = session.customer_email;
+        if (session.payment_status === "paid") {
+          const email = session.customer_email;
 
-      const result = await usersCollection.updateOne(
-        { email },
-        { $set: { isPremium: true } }
-      );
+          const result = await usersCollection.updateOne(
+            { email },
+            { $set: { isPremium: true } }
+          );
 
-      res.send({ success: true });
-    } else {
-      res.status(400).send({ success: false });
-    }
-  } catch (error) {
-    res.status(500).send({ error: "Payment verification failed" });
-  }
-});
+          res.send({ success: true });
+        } else {
+          res.status(400).send({ success: false });
+        }
+      } catch (error) {
+        res.status(500).send({ error: "Payment verification failed" });
+      }
+    });
 
 
 
