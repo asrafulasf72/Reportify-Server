@@ -121,20 +121,21 @@ async function run() {
         });
       }
       const issue = {
-        title: title,
-        description: description,
-        category: category,
-        location: location,
-        image: image,
-
+        title,
+        description,
+        category,
+        location,
+        image,
 
         citizenEmail: email,
         citizenName: user.displayName || "Citizen",
 
-
         status: "pending",
         priority: "normal",
         isBoosted: false,
+
+        upvotes: [],
+        upvoteCount: 0,
 
         assignedStaff: null,
 
@@ -149,9 +150,7 @@ async function run() {
 
         createdAt: new Date()
       }
-
       const result = await issuesCollaction.insertOne(issue)
-
 
       //  Increase user issue count
       await usersCollection.updateOne(
@@ -190,6 +189,37 @@ async function run() {
       }
       res.send(issues)
     })
+
+    // Get All Issues 
+    app.get('/all-issues', async (req, res) => {
+      try {
+        const { search, category, status, priority } = req.query;
+        let query = {};
+
+        if (search && search.trim() !== "") {
+          query.$or = [
+            { title: { $regex: search, $options: "i" } },
+            { category: { $regex: search, $options: "i" } },
+            { location: { $regex: search, $options: "i" } }
+          ];
+        }
+
+        if (category) query.category = category;
+        if (status) query.status = status;
+        if (priority) query.priority = priority;
+
+        const issues = await issuesCollaction
+          .find(query)
+          .sort({ isBoosted: -1, createdAt: -1 }) // correct field
+          .toArray();
+
+        res.send(issues);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to load issues" });
+      }
+    });
+
+
 
     // Issues Update 
 
@@ -343,44 +373,74 @@ async function run() {
     // Boost Succes API
 
     app.post('/boost-payment-success', verifyFirebaseToken, async (req, res) => {
-  const { sessionId, issueId } = req.body;
+      const { sessionId, issueId } = req.body;
 
-  const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-  if (session.payment_status !== "paid") {
-    return res.status(400).send({ message: "Payment not successful" });
-  }
-
-  const issue = await issuesCollaction.findOne({
-    _id: new ObjectId(issueId)
-  });
-
-  if (!issue || issue.isBoosted) {
-    return res.status(400).send({ message: "Invalid issue" });
-  }
-
-  const result = await issuesCollaction.updateOne(
-    { _id: new ObjectId(issueId) },
-    {
-      $set: {
-        isBoosted: true,
-        priority: "high"
-      },
-      $push: {
-        timeline: {
-          status: "boosted",
-          message: "Issue boosted by citizen (payment successful)",
-          updatedBy: "citizen",
-          date: new Date()
-        }
+      if (session.payment_status !== "paid") {
+        return res.status(400).send({ message: "Payment not successful" });
       }
-    }
-  );
 
-  res.send({ success: true });
-});
+      const issue = await issuesCollaction.findOne({
+        _id: new ObjectId(issueId)
+      });
 
+      if (!issue || issue.isBoosted) {
+        return res.status(400).send({ message: "Invalid issue" });
+      }
 
+      const result = await issuesCollaction.updateOne(
+        { _id: new ObjectId(issueId) },
+        {
+          $set: {
+            isBoosted: true,
+            priority: "high"
+          },
+          $push: {
+            timeline: {
+              status: "boosted",
+              message: "Issue boosted by citizen (payment successful)",
+              updatedBy: "citizen",
+              date: new Date()
+            }
+          }
+        }
+      );
+
+      res.send({ success: true });
+    });
+
+    // UpVote API
+    app.patch('/issues/upvote/:id', verifyFirebaseToken, async (req, res) => {
+      const issueId = req.params.id;
+      const userEmail = req.decodedEmail;
+
+      const issue = await issuesCollaction.findOne({
+        _id: new ObjectId(issueId)
+      });
+
+      if (!issue) {
+        return res.status(404).send({ message: "Issue not found" });
+      }
+
+      if (issue.citizenEmail === userEmail) {
+        return res.status(403).send({ message: "You cannot upvote your own issue" });
+      }
+
+      if (issue.upvotes.includes(userEmail)) {
+        return res.status(400).send({ message: "Already upvoted" });
+      }
+
+      const result = await issuesCollaction.updateOne(
+        { _id: new ObjectId(issueId) },
+        {
+          $push: { upvotes: userEmail },
+          $inc: { upvoteCount: 1 }
+        }
+      );
+
+      res.send(result);
+    });
 
 
 
