@@ -55,7 +55,7 @@ async function run() {
     const db = client.db("ReportifyDB")
     const usersCollection = db.collection("users")
     const issuesCollaction = db.collection("issues")
-    
+
     // USers API Here 
     app.post('/users', async (req, res) => {
       const user = req.body;
@@ -108,8 +108,8 @@ async function run() {
 
     // Issues Post Api here
     app.post('/issues', verifyFirebaseToken, async (req, res) => {
-      const { title, description, category, location, image} = req.body;
-        const email=req.decodedEmail;
+      const { title, description, category, location, image } = req.body;
+      const email = req.decodedEmail;
       if (email !== req.decodedEmail) {
         return res.status(403).send({ message: 'Forbidden' })
       }
@@ -126,28 +126,28 @@ async function run() {
         category: category,
         location: location,
         image: image,
-     
+
 
         citizenEmail: email,
         citizenName: user.displayName || "Citizen",
 
 
-           status: "pending",
-           priority: "normal",
-          isBoosted: false,
-
-          assignedStaff: null,
-
-         timeline: [
-      {
         status: "pending",
-        message: "Issue reported by citizen",
-        updatedBy: "citizen",
-        date: new Date()
-      }
-    ],
+        priority: "normal",
+        isBoosted: false,
 
-     createdAt: new Date()
+        assignedStaff: null,
+
+        timeline: [
+          {
+            status: "pending",
+            message: "Issue reported by citizen",
+            updatedBy: "citizen",
+            date: new Date()
+          }
+        ],
+
+        createdAt: new Date()
       }
 
       const result = await issuesCollaction.insertOne(issue)
@@ -163,76 +163,89 @@ async function run() {
 
     // Issue Get API
 
-app.get('/issues/:email', verifyFirebaseToken, async (req, res) => {
-  const email = req.params.email;
+    app.get('/issues/:email', verifyFirebaseToken, async (req, res) => {
+      const email = req.params.email;
 
-  if (email !== req.decodedEmail) {
-    return res.status(403).send({ message: 'Forbidden access' });
-  }
+      if (email !== req.decodedEmail) {
+        return res.status(403).send({ message: 'Forbidden access' });
+      }
 
-  const result = await issuesCollaction
-    .find({ citizenEmail: email })
-    .sort({ createdAt: -1 })
-    .toArray();
+      const result = await issuesCollaction
+        .find({ citizenEmail: email })
+        .sort({ createdAt: -1 })
+        .toArray();
 
-  res.send(result);
-});
+      res.send(result);
+    });
+
+    // Gingle Issues Get 
+
+    app.get('/issues/details/:id', verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id
+      const query = { _id: new ObjectId(id) }
+
+      const issues = await issuesCollaction.findOne(query)
+      if (!issues) {
+        return res.status(404).send({ message: "Issue not found" });
+      }
+      res.send(issues)
+    })
 
     // Issues Update 
 
-app.patch('/issues/:id', verifyFirebaseToken, async (req, res) => {
-  const id = req.params.id;
-  const email = req.decodedEmail;
-  const updatedData = req.body;
+    app.patch('/issues/:id', verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const email = req.decodedEmail;
+      const updatedData = req.body;
 
-  const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
+      const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
 
-  if (!issue) {
-    return res.status(404).send({ message: "Issue not found" });
-  }
+      if (!issue) {
+        return res.status(404).send({ message: "Issue not found" });
+      }
 
-  if (issue.citizenEmail !== email) {
-    return res.status(403).send({ message: "Forbidden" });
-  }
+      if (issue.citizenEmail !== email) {
+        return res.status(403).send({ message: "Forbidden" });
+      }
 
-  if (issue.status !== "pending") {
-    return res.status(403).send({ message: "Cannot edit this issue" });
-  }
+      if (issue.status !== "pending") {
+        return res.status(403).send({ message: "Cannot edit this issue" });
+      }
 
-  const result = await issuesCollaction.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: updatedData }
-  );
+      const result = await issuesCollaction.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updatedData }
+      );
 
-  res.send(result);
-});
+      res.send(result);
+    });
 
 
 
     // Delete Issues API here
-  app.delete('/issues/:id', verifyFirebaseToken, async (req, res) => {
-  const id = req.params.id;
-  const email = req.decodedEmail;
+    app.delete('/issues/:id', verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const email = req.decodedEmail;
 
-  const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
+      const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
 
-  if (!issue) {
-    return res.status(404).send({ message: "Issue not found" });
-  }
+      if (!issue) {
+        return res.status(404).send({ message: "Issue not found" });
+      }
 
-  if (issue.citizenEmail !== email) {
-    return res.status(403).send({ message: "Forbidden" });
-  }
+      if (issue.citizenEmail !== email) {
+        return res.status(403).send({ message: "Forbidden" });
+      }
 
-  await issuesCollaction.deleteOne({ _id: new ObjectId(id) });
+      await issuesCollaction.deleteOne({ _id: new ObjectId(id) });
 
-  await usersCollection.updateOne(
-    { email },
-    { $inc: { issueCount: -1 } }
-  );
+      await usersCollection.updateOne(
+        { email },
+        { $inc: { issueCount: -1 } }
+      );
 
-  res.send({ success: true });
-});
+      res.send({ success: true });
+    });
 
 
     /****************************************************************************************/
@@ -286,6 +299,88 @@ app.patch('/issues/:id', verifyFirebaseToken, async (req, res) => {
         res.status(500).send({ error: "Payment verification failed" });
       }
     });
+
+    /**--------------------------------------------------------------------------------------- */
+    app.post('/create-boost-session', verifyFirebaseToken, async (req, res) => {
+      const { issueId } = req.body;
+      const email = req.decodedEmail;
+
+      const issue = await issuesCollaction.findOne({
+        _id: new ObjectId(issueId)
+      });
+
+      if (!issue) {
+        return res.status(404).send({ message: "Issue not found" });
+      }
+
+      if (issue.isBoosted) {
+        return res.status(400).send({ message: "Issue already boosted" });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "bdt",
+              unit_amount: 100 * 100,
+              product_data: {
+                name: "Issue Priority Boost",
+                description: `Boost issue: ${issue.title}`,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        customer_email: email,
+        success_url: `${process.env.SITE_DOMAIN}/issues/boost-success?session_id={CHECKOUT_SESSION_ID}&issueId=${issueId}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/issues/details/${issueId}`,
+      });
+
+      res.send({ url: session.url });
+    });
+
+    // Boost Succes API
+
+    app.post('/boost-payment-success', verifyFirebaseToken, async (req, res) => {
+  const { sessionId, issueId } = req.body;
+
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+  if (session.payment_status !== "paid") {
+    return res.status(400).send({ message: "Payment not successful" });
+  }
+
+  const issue = await issuesCollaction.findOne({
+    _id: new ObjectId(issueId)
+  });
+
+  if (!issue || issue.isBoosted) {
+    return res.status(400).send({ message: "Invalid issue" });
+  }
+
+  const result = await issuesCollaction.updateOne(
+    { _id: new ObjectId(issueId) },
+    {
+      $set: {
+        isBoosted: true,
+        priority: "high"
+      },
+      $push: {
+        timeline: {
+          status: "boosted",
+          message: "Issue boosted by citizen (payment successful)",
+          updatedBy: "citizen",
+          date: new Date()
+        }
+      }
+    }
+  );
+
+  res.send({ success: true });
+});
+
+
 
 
 
