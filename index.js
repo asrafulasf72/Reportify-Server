@@ -55,10 +55,7 @@ async function run() {
     const db = client.db("ReportifyDB")
     const usersCollection = db.collection("users")
     const issuesCollaction = db.collection("issues")
-    const issueTimelineCollaction = db.collection("issueTimeline")
-
-
-
+    
     // USers API Here 
     app.post('/users', async (req, res) => {
       const user = req.body;
@@ -111,8 +108,8 @@ async function run() {
 
     // Issues Post Api here
     app.post('/issues', verifyFirebaseToken, async (req, res) => {
-      const { title, description, category, location, image, email } = req.body;
-
+      const { title, description, category, location, image} = req.body;
+        const email=req.decodedEmail;
       if (email !== req.decodedEmail) {
         return res.status(403).send({ message: 'Forbidden' })
       }
@@ -129,21 +126,32 @@ async function run() {
         category: category,
         location: location,
         image: image,
-        email: email,
+     
+
+        citizenEmail: email,
+        citizenName: user.displayName || "Citizen",
+
+
+           status: "pending",
+           priority: "normal",
+          isBoosted: false,
+
+          assignedStaff: null,
+
+         timeline: [
+      {
         status: "pending",
-        createdAt: new Date().toISOString()
+        message: "Issue reported by citizen",
+        updatedBy: "citizen",
+        date: new Date()
+      }
+    ],
+
+     createdAt: new Date()
       }
 
       const result = await issuesCollaction.insertOne(issue)
 
-      //  TimeLine Record
-      await issueTimelineCollaction.insertOne({
-        issueId: result.insertedId,
-        email,
-        status: "Issue Reported",
-        message: "Citizen  created the issue",
-        createdAt: new Date(),
-      });
 
       //  Increase user issue count
       await usersCollection.updateOne(
@@ -155,83 +163,76 @@ async function run() {
 
     // Issue Get API
 
-    app.get('/issues/:email', verifyFirebaseToken, async (req, res) => {
-      const email = req.params.email
-      if (email !== req.decodedEmail) {
-        return res.status(403).send({ message: 'Forbidden access' })
-      }
-      const cursor = issuesCollaction.find({ email }).sort({ createdAt: -1 })
-      const result = await cursor.toArray()
-      res.send(result)
-    })
+app.get('/issues/:email', verifyFirebaseToken, async (req, res) => {
+  const email = req.params.email;
+
+  if (email !== req.decodedEmail) {
+    return res.status(403).send({ message: 'Forbidden access' });
+  }
+
+  const result = await issuesCollaction
+    .find({ citizenEmail: email })
+    .sort({ createdAt: -1 })
+    .toArray();
+
+  res.send(result);
+});
 
     // Issues Update 
 
-    app.patch("/issues/:id", async (req, res) => {
-      const id = req.params.id;
-      const updatedData = req.body;
+app.patch('/issues/:id', verifyFirebaseToken, async (req, res) => {
+  const id = req.params.id;
+  const email = req.decodedEmail;
+  const updatedData = req.body;
 
-      const issue = await issuesCollaction.findOne({
-        _id: new ObjectId(id),
-      });
+  const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
 
-      // Only pending issues editable
-      if (issue.status !== "pending") {
-        return res.status(403).send({ message: "Cannot edit this issue" });
-      }
+  if (!issue) {
+    return res.status(404).send({ message: "Issue not found" });
+  }
 
-      const result = await issuesCollaction.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updatedData }
-      );
+  if (issue.citizenEmail !== email) {
+    return res.status(403).send({ message: "Forbidden" });
+  }
 
-      //  Timeline
-      await issueTimelineCollaction.insertOne({
-        issueId: new ObjectId(id),
-        email: issue.email,
-        action: "Issue Updated",
-        date: new Date(),
-      });
+  if (issue.status !== "pending") {
+    return res.status(403).send({ message: "Cannot edit this issue" });
+  }
 
-      res.send(result);
-    });
+  const result = await issuesCollaction.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: updatedData }
+  );
+
+  res.send(result);
+});
 
 
 
     // Delete Issues API here
-    app.delete("/issues/:id", verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) }
+  app.delete('/issues/:id', verifyFirebaseToken, async (req, res) => {
+  const id = req.params.id;
+  const email = req.decodedEmail;
 
-      // 1️Find issue first
-      const issue = await issuesCollaction.findOne(query);
+  const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
 
-      if (!issue) {
-        return res.status(404).send({ message: "Issue not found" });
-      }
-      if (issue.email !== req.decodedEmail) {
-        return res.status(403).send({ message: "Forbidden" })
-      }
-      //  Delete the issue
-      const deleteIssueResult = await issuesCollaction.deleteOne(query);
+  if (!issue) {
+    return res.status(404).send({ message: "Issue not found" });
+  }
 
-      //  Delete all timeline records of this issue
-      const deleteTimelineResult = await issueTimelineCollaction.deleteMany({
-        issueId: new ObjectId(id),
-      });
+  if (issue.citizenEmail !== email) {
+    return res.status(403).send({ message: "Forbidden" });
+  }
 
-      //  Decrease user's issue count
-      await usersCollection.updateOne(
-        { email: issue.email },
-        { $inc: { issueCount: -1 } }
-      );
+  await issuesCollaction.deleteOne({ _id: new ObjectId(id) });
 
-      res.send({
-        success: true,
-        deletedIssue: deleteIssueResult.deletedCount,
-        deletedTimeline: deleteTimelineResult.deletedCount,
-      });
-    });
+  await usersCollection.updateOne(
+    { email },
+    { $inc: { issueCount: -1 } }
+  );
+
+  res.send({ success: true });
+});
 
 
     /****************************************************************************************/
