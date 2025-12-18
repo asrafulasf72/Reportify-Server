@@ -56,7 +56,7 @@ async function run() {
     const usersCollection = db.collection("users")
     const issuesCollaction = db.collection("issues")
 
-
+    /**Role Verify */
     const verifyAdmin = async (req, res, next) => {
       const email = req.decodedEmail;
       const user = await usersCollection.findOne({ email });
@@ -116,17 +116,17 @@ async function run() {
     })
 
     // Get User Role API 
-    app.get("/users/:email/role", verifyFirebaseToken,async (req, res) => {
-        const email = req.params.email;
+    app.get("/users/:email/role", verifyFirebaseToken, async (req, res) => {
+      const email = req.params.email;
 
-        if (email !== req.decodedEmail) {
-          return res.status(403).send({ message: "Forbidden" });
-        }
-
-        const user = await usersCollection.findOne({ email });
-
-        res.send({ role: user?.role || "citizen" });
+      if (email !== req.decodedEmail) {
+        return res.status(403).send({ message: "Forbidden" });
       }
+
+      const user = await usersCollection.findOne({ email });
+
+      res.send({ role: user?.role || "citizen" });
+    }
     );
 
     /****************************************************************************************/
@@ -311,6 +311,46 @@ async function run() {
 
       res.send({ success: true });
     });
+
+    /**Admin get  All Issues API Here  */
+
+    app.get("/admin/issues", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const issues = await issuesCollaction.find().sort({ isBoosted: -1, createdAt: -1 })
+        .toArray();
+
+      res.send(issues);
+    }
+    );
+
+    // Issues Rejact API
+    app.patch("/admin/issues/reject/:id",verifyFirebaseToken, verifyAdmin, async (req, res) => {
+        const { id } = req.params;
+        const issue = await issuesCollaction.findOne({ _id: new ObjectId(id)});
+        
+        if (issue.status !== "pending") {
+          return res
+            .status(400)
+            .send({ message: "Only pending issues can be rejected" });
+        }
+
+        const result = await issuesCollaction.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: { status: "rejected" },
+            $push: {
+              timeline: {
+                status: "rejected",
+                message: "Issue rejected by admin",
+                updatedBy: "admin",
+                date: new Date(),
+              },
+            },
+          }
+        );
+
+        res.send(result);
+      }
+    );
 
 
     /****************************************************************************************/
