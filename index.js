@@ -115,6 +115,20 @@ async function run() {
       res.send(result)
     })
 
+    // Get User Role API 
+    app.get("/users/:email/role", verifyFirebaseToken,async (req, res) => {
+        const email = req.params.email;
+
+        if (email !== req.decodedEmail) {
+          return res.status(403).send({ message: "Forbidden" });
+        }
+
+        const user = await usersCollection.findOne({ email });
+
+        res.send({ role: user?.role || "citizen" });
+      }
+    );
+
     /****************************************************************************************/
     /*Issues Related API*/
 
