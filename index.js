@@ -56,6 +56,18 @@ async function run() {
     const usersCollection = db.collection("users")
     const issuesCollaction = db.collection("issues")
 
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decodedEmail;
+      const user = await usersCollection.findOne({ email });
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "Admin access only" });
+      }
+
+      next();
+    };
+
     // USers API Here 
     app.post('/users', async (req, res) => {
       const user = req.body;
@@ -179,46 +191,55 @@ async function run() {
 
     // Gingle Issues Get 
 
-    app.get('/issues/details/:id', verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id
-      const query = { _id: new ObjectId(id) }
+    app.get('/issues/details/:id', async (req, res) => {
+      const { id } = req.params;
 
-      const issues = await issuesCollaction.findOne(query)
-      if (!issues) {
+      const issue = await issuesCollaction.findOne({
+        _id: new ObjectId(id)
+      });
+
+      if (!issue) {
         return res.status(404).send({ message: "Issue not found" });
       }
-      res.send(issues)
-    })
+
+      res.send(issue);
+    });
+
 
     // Get All Issues 
     app.get('/all-issues', async (req, res) => {
       try {
-        const { search, category, status, priority } = req.query;
+        const { search = "", category, status, priority, page = 1, limit = 6 } = req.query;
         let query = {};
-
-        if (search && search.trim() !== "") {
+        // SEARCH
+        if (search.trim()) {
           query.$or = [
             { title: { $regex: search, $options: "i" } },
             { category: { $regex: search, $options: "i" } },
             { location: { $regex: search, $options: "i" } }
           ];
         }
-
+        //  FILTER
         if (category) query.category = category;
         if (status) query.status = status;
         if (priority) query.priority = priority;
 
-        const issues = await issuesCollaction
-          .find(query)
-          .sort({ isBoosted: -1, createdAt: -1 }) // correct field
-          .toArray();
+        const skip = (Number(page) - 1) * Number(limit);
 
-        res.send(issues);
-      } catch (err) {
+        const total = await issuesCollaction.countDocuments(query);
+
+        const issues = await issuesCollaction.find(query).sort({ isBoosted: -1, createdAt: -1 }).skip(skip).limit(Number(limit)).toArray();
+
+        res.send({
+          issues,
+          total,
+          totalPages: Math.ceil(total / limit),
+          currentPage: Number(page)
+        });
+      } catch (error) {
         res.status(500).send({ message: "Failed to load issues" });
       }
     });
-
 
 
     // Issues Update 
