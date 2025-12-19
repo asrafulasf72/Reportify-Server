@@ -55,6 +55,8 @@ async function run() {
     const db = client.db("ReportifyDB")
     const usersCollection = db.collection("users")
     const issuesCollaction = db.collection("issues")
+    const paymentsCollection = db.collection("payments");
+
 
     /**Role Verify */
     const verifyAdmin = async (req, res, next) => {
@@ -525,28 +527,52 @@ async function run() {
       res.send({ url: session.url });
     });
 
-    app.post("/payment-success", async (req, res) => {
-      const { sessionId } = req.body;
+    // Payment Success API
+app.post("/payment-success", async (req, res) => {
+  const { sessionId } = req.body;
 
-      try {
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        if (session.payment_status === "paid") {
-          const email = session.customer_email;
+    if (session.payment_status !== "paid") {
+      return res.status(400).send({ success: false });
+    }
 
-          const result = await usersCollection.updateOne(
-            { email },
-            { $set: { isPremium: true } }
-          );
-
-          res.send({ success: true });
-        } else {
-          res.status(400).send({ success: false });
-        }
-      } catch (error) {
-        res.status(500).send({ error: "Payment verification failed" });
-      }
+    //  DUPLICATE CHECK
+    const existingPayment = await paymentsCollection.findOne({
+      paymentIntent: session.payment_intent
     });
+
+    if (existingPayment) {
+      return res.send({ success: true, message: "Already processed" });
+    }
+
+    const email = session.customer_email;
+
+    const payment = {
+      email,
+      amount: session.amount_total / 100,
+      currency: session.currency,
+      paymentIntent: session.payment_intent,
+      status: session.payment_status,
+      type: "premium",
+      createdAt: new Date(session.created * 1000),
+      month: new Date(session.created * 1000).getMonth() + 1,
+      year: new Date(session.created * 1000).getFullYear(),
+    };
+
+    await paymentsCollection.insertOne(payment);
+
+    await usersCollection.updateOne(
+      { email },
+      { $set: { isPremium: true } }
+    );
+
+    res.send({ success: true });
+  } catch (error) {
+    res.status(500).send({ error: "Payment verification failed" });
+  }
+});
 
     /**--------------------------------------------------------------------------------------- */
     app.post('/create-boost-session', verifyFirebaseToken, async (req, res) => {
@@ -589,44 +615,99 @@ async function run() {
     });
 
     // Boost Succes API
+app.post('/boost-payment-success', verifyFirebaseToken, async (req, res) => {
+  const { sessionId, issueId } = req.body;
+  const email = req.decodedEmail;
 
-    app.post('/boost-payment-success', verifyFirebaseToken, async (req, res) => {
-      const { sessionId, issueId } = req.body;
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+  if (session.payment_status !== "paid") {
+    return res.status(400).send({ message: "Payment not successful" });
+  }
 
-      if (session.payment_status !== "paid") {
-        return res.status(400).send({ message: "Payment not successful" });
-      }
+  //  DUPLICATE CHECK
+  const exists = await paymentsCollection.findOne({
+    paymentIntent: session.payment_intent
+  });
 
-      const issue = await issuesCollaction.findOne({
-        _id: new ObjectId(issueId)
-      });
+  if (exists) {
+    return res.send({ success: true, message: "Already processed" });
+  }
 
-      if (!issue || issue.isBoosted) {
-        return res.status(400).send({ message: "Invalid issue" });
-      }
+  const issue = await issuesCollaction.findOne({
+    _id: new ObjectId(issueId)
+  });
 
-      const result = await issuesCollaction.updateOne(
-        { _id: new ObjectId(issueId) },
-        {
-          $set: {
-            isBoosted: true,
-            priority: "high"
-          },
-          $push: {
-            timeline: {
-              status: "boosted",
-              message: "Issue boosted by citizen (payment successful)",
-              updatedBy: "citizen",
-              date: new Date()
-            }
-          }
+  if (!issue || issue.isBoosted) {
+    return res.status(400).send({ message: "Invalid issue" });
+  }
+
+  //  SAVE PAYMENT
+  const payment = {
+    email,
+    amount: session.amount_total / 100,
+    currency: session.currency,
+    paymentIntent: session.payment_intent,
+    status: session.payment_status,
+    type: "boost",
+    issueId,
+    createdAt: new Date(session.created * 1000),
+    month: new Date(session.created * 1000).getMonth() + 1,
+    year: new Date(session.created * 1000).getFullYear(),
+  };
+
+  await paymentsCollection.insertOne(payment);
+
+  // UPDATE ISSUE
+  await issuesCollaction.updateOne(
+    { _id: new ObjectId(issueId) },
+    {
+      $set: {
+        isBoosted: true,
+        priority: "high"
+      },
+      $push: {
+        timeline: {
+          status: "boosted",
+          message: "Issue boosted by citizen (payment successful)",
+          updatedBy: "citizen",
+          date: new Date()
         }
-      );
+      }
+    }
+  );
 
-      res.send({ success: true });
-    });
+  res.send({ success: true });
+});
+
+
+    // Get all payments (Admin)
+app.get("/admin/payments", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+    const { email, month, year } = req.query;
+
+    let query = {};
+
+    if (email) {
+      query.email = { $regex: email, $options: "i" };
+    }
+
+    if (month) {
+      query.month = Number(month);
+    }
+
+    if (year) {
+      query.year = Number(year);
+    }
+
+    const payments = await paymentsCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(payments);
+  }
+);
+
 
     // UpVote API
     app.patch('/issues/upvote/:id', verifyFirebaseToken, async (req, res) => {
