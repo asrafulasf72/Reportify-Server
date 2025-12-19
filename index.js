@@ -462,7 +462,7 @@ async function run() {
 
       const { status, priority } = req.query;
 
-      let query = { assignedStaff: email };
+      let query = { assignedStaff: email, status: { $ne: "closed" } };
 
       if (status) query.status = status;
       if (priority) query.priority = priority;
@@ -477,57 +477,57 @@ async function run() {
     );
 
     // Staff: change issue status
-    app.patch( "/staff/issues/status/:id", verifyFirebaseToken, async (req, res) => {
-        const email = req.decodedEmail;
-        const { id } = req.params;
-        const { status } = req.body;
+    app.patch("/staff/issues/status/:id", verifyFirebaseToken, async (req, res) => {
+      const email = req.decodedEmail;
+      const { id } = req.params;
+      const { status } = req.body;
 
-        const user = await usersCollection.findOne({ email });
-        if (!user || user.role !== "staff") {
-          return res.status(403).send({ message: "Staff access only" });
-        }
-
-        const issue = await issuesCollaction.findOne({
-          _id: new ObjectId(id),
-        });
-
-        if (!issue) {
-          return res.status(404).send({ message: "Issue not found" });
-        }
-
-        if (issue.assignedStaff !== email) {
-          return res.status(403).send({ message: "Not assigned to you" });
-        }
-
-        //  STATUS FLOW VALIDATION
-        const allowedFlow = {
-          pending: ["in-progress"],
-          "in-progress": ["working"],
-          working: ["resolved"],
-          resolved: ["closed"],
-        };
-
-        if (!allowedFlow[issue.status]?.includes(status)) {
-          return res.status(400).send({ message: "Invalid status change" });
-        }
-
-        const result = await issuesCollaction.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: { status },
-            $push: {
-              timeline: {
-                status,
-                message: `Status changed to ${status}`,
-                updatedBy: "staff",
-                date: new Date(),
-              },
-            },
-          }
-        );
-
-        res.send(result);
+      const user = await usersCollection.findOne({ email });
+      if (!user || user.role !== "staff") {
+        return res.status(403).send({ message: "Staff access only" });
       }
+
+      const issue = await issuesCollaction.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!issue) {
+        return res.status(404).send({ message: "Issue not found" });
+      }
+
+      if (issue.assignedStaff !== email) {
+        return res.status(403).send({ message: "Not assigned to you" });
+      }
+
+      //  STATUS FLOW VALIDATION
+      const allowedFlow = {
+        pending: ["in-progress"],
+        "in-progress": ["working"],
+        working: ["resolved"],
+        resolved: ["closed"],
+      };
+
+      if (!allowedFlow[issue.status]?.includes(status)) {
+        return res.status(400).send({ message: "Invalid status change" });
+      }
+
+      const result = await issuesCollaction.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: { status },
+          $push: {
+            timeline: {
+              status,
+              message: `Status changed to ${status}`,
+              updatedBy: "staff",
+              date: new Date(),
+            },
+          },
+        }
+      );
+
+      res.send(result);
+    }
     );
 
 
@@ -604,9 +604,6 @@ async function run() {
         res.send(result);
       }
     );
-
-
-
 
     /****************************************************************************************/
     // Payment Related API here
@@ -851,7 +848,83 @@ async function run() {
       res.send(result);
     });
 
+    // ================= ADMIN DASHBOARD STATS =================
+    app.get("/admin/dashboard-stats", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+        try {
+          const totalIssues = await issuesCollaction.countDocuments();
 
+          const pendingIssues = await issuesCollaction.countDocuments({
+            status: "pending",
+          });
+
+          const resolvedIssues = await issuesCollaction.countDocuments({
+            status: "resolved",
+          });
+
+          const rejectedIssues = await issuesCollaction.countDocuments({
+            status: "rejected",
+          });
+
+          // Total payment
+          const payments = await paymentsCollection.find().toArray();
+          const totalRevenue = payments.reduce(
+            (sum, p) => sum + Number(p.amount || 0),
+            0
+          );
+
+          // Latest data
+          const latestIssues = await issuesCollaction
+            .find()
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .toArray();
+
+          const latestPayments = await paymentsCollection
+            .find()
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .toArray();
+
+          const latestUsers = await usersCollection
+            .find({ role: "citizen" })
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .toArray();
+
+          res.send({
+            stats: {
+              totalIssues,
+              pendingIssues,
+              resolvedIssues,
+              rejectedIssues,
+              totalRevenue,
+            },
+            latestIssues,
+            latestPayments,
+            latestUsers,
+          });
+        } catch (error) {
+          res.status(500).send({ message: "Failed to load dashboard stats" });
+        }
+      }
+    );
+
+    app.get("/admin/payment-chart", verifyFirebaseToken, verifyAdmin,async (req, res) => {
+        const result = await paymentsCollection
+          .aggregate([
+            {
+              $group: {
+                _id: { month: "$month", year: "$year" },
+                total: { $sum: "$amount" },
+              },
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+          ])
+          .toArray();
+
+        res.send(result);
+      }
+    );
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
