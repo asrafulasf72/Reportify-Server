@@ -146,6 +146,9 @@ async function run() {
           message: "Free users can submit only 3 issues. Upgrade to premium."
         });
       }
+      if (user.isBlocked) {
+        return res.status(403).send({ message: "You are blocked by admin" });
+      }
       const issue = {
         title,
         description,
@@ -333,101 +336,101 @@ async function run() {
     );
 
     // Post Staf IN DB
-app.post("/admin/staff", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-    try {
-      const { email, password, displayName, phone, photoURL } = req.body;
+    app.post("/admin/staff", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const { email, password, displayName, phone, photoURL } = req.body;
 
-      if (!email || !password || !displayName) {
-        return res.status(400).send({ message: "Missing required fields" });
-      }
+        if (!email || !password || !displayName) {
+          return res.status(400).send({ message: "Missing required fields" });
+        }
 
-      const exists = await usersCollection.findOne({ email });
-      if (exists) {
-        return res.status(409).send({ message: "Staff already exists" });
-      }
+        const exists = await usersCollection.findOne({ email });
+        if (exists) {
+          return res.status(409).send({ message: "Staff already exists" });
+        }
 
-      //  Firebase user create
-      const firebaseUser = await admin.auth().createUser({ email, password, displayName, photoURL });
+        //  Firebase user create
+        const firebaseUser = await admin.auth().createUser({ email, password, displayName, photoURL });
 
-      //  Save to DB
-      const staff = {
-        email,
-        displayName,
-        phone,
-        photoURL,
-        role: "staff",
-        createdAt: new Date(),
-      };
-
-      await usersCollection.insertOne(staff);
-
-      res.send({ success: true });
-    } catch (error) {
-      console.error("Create staff error:", error);
-
-      // 🔥 Rollback Firebase user if DB fails
-      if (req.body?.email) {
-        try {
-          const user = await admin.auth().getUserByEmail(req.body.email);
-          await admin.auth().deleteUser(user.uid);
-        } catch (e) {}
-      }
-
-      res.status(500).send({
-        message: "Failed to create staff",
-        error: error.message,
-      });
-    }
-  }
-);
-
-
-// Update Staff 
-app.patch("/admin/staff/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-  try {
-    const email = req.params.email;
-    const { displayName, phone, photoURL } = req.body;
-
-    // 🔹 Firebase user update
-    const user = await admin.auth().getUserByEmail(email);
-
-    await admin.auth().updateUser(user.uid, {
-      displayName,
-      photoURL,
-    });
-
-    // 🔹 MongoDB update
-    const result = await usersCollection.updateOne(
-      { email },
-      {
-        $set: {
+        //  Save to DB
+        const staff = {
+          email,
           displayName,
           phone,
           photoURL,
-        },
+          role: "staff",
+          createdAt: new Date(),
+        };
+
+        await usersCollection.insertOne(staff);
+
+        res.send({ success: true });
+      } catch (error) {
+        console.error("Create staff error:", error);
+
+        // 🔥 Rollback Firebase user if DB fails
+        if (req.body?.email) {
+          try {
+            const user = await admin.auth().getUserByEmail(req.body.email);
+            await admin.auth().deleteUser(user.uid);
+          } catch (e) { }
+        }
+
+        res.status(500).send({
+          message: "Failed to create staff",
+          error: error.message,
+        });
       }
+    }
     );
 
-    res.send({ success: true, result });
-  } catch (error) {
-    console.error("Update staff error:", error);
-    res.status(500).send({ message: "Failed to update staff" });
-  }
-});
+
+    // Update Staff 
+    app.patch("/admin/staff/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const { displayName, phone, photoURL } = req.body;
+
+        // 🔹 Firebase user update
+        const user = await admin.auth().getUserByEmail(email);
+
+        await admin.auth().updateUser(user.uid, {
+          displayName,
+          photoURL,
+        });
+
+        // 🔹 MongoDB update
+        const result = await usersCollection.updateOne(
+          { email },
+          {
+            $set: {
+              displayName,
+              phone,
+              photoURL,
+            },
+          }
+        );
+
+        res.send({ success: true, result });
+      } catch (error) {
+        console.error("Update staff error:", error);
+        res.status(500).send({ message: "Failed to update staff" });
+      }
+    });
 
 
-// Delete Staf
-app.delete(
-  "/admin/staff/:email",
-  verifyFirebaseToken,
-  verifyAdmin,
-  async (req, res) => {
-    const email = req.params.email;
+    // Delete Staf
+    app.delete(
+      "/admin/staff/:email",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const email = req.params.email;
 
-    const result = await usersCollection.deleteOne({ email });
-    res.send(result);
-  }
-);
+        const result = await usersCollection.deleteOne({ email });
+        res.send(result);
+      }
+    );
 
 
 
@@ -460,6 +463,37 @@ app.delete(
       res.send(result);
     }
     );
+
+    /**Admin Get Users API  Here*/
+    // Get all citizen users (Admin)
+    app.get("/admin/users", verifyFirebaseToken, verifyAdmin,
+      async (req, res) => {
+        const users = await usersCollection
+          .find({ role: "citizen" })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.send(users);
+      }
+    );
+
+
+    // Block / Unblock user
+    app.patch("/admin/users/block/:email", verifyFirebaseToken, verifyAdmin,
+      async (req, res) => {
+        const email = req.params.email;
+        const { isBlocked } = req.body;
+
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: { isBlocked } }
+        );
+
+        res.send(result);
+      }
+    );
+
+
 
 
     /****************************************************************************************/
