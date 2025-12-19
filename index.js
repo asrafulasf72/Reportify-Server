@@ -322,34 +322,143 @@ async function run() {
     }
     );
 
-    // Issues Rejact API
-    app.patch("/admin/issues/reject/:id",verifyFirebaseToken, verifyAdmin, async (req, res) => {
-        const { id } = req.params;
-        const issue = await issuesCollaction.findOne({ _id: new ObjectId(id)});
-        
-        if (issue.status !== "pending") {
-          return res
-            .status(400)
-            .send({ message: "Only pending issues can be rejected" });
-        }
 
-        const result = await issuesCollaction.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: { status: "rejected" },
-            $push: {
-              timeline: {
-                status: "rejected",
-                message: "Issue rejected by admin",
-                updatedBy: "admin",
-                date: new Date(),
-              },
-            },
-          }
-        );
+    // Get All Staff
+    app.get("/admin/staffs", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const staffs = await usersCollection
+        .find({ role: "staff" })
+        .toArray();
+      res.send(staffs);
+    }
+    );
 
-        res.send(result);
+    // Post Staf IN DB
+app.post("/admin/staff", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+    try {
+      const { email, password, displayName, phone, photoURL } = req.body;
+
+      if (!email || !password || !displayName) {
+        return res.status(400).send({ message: "Missing required fields" });
       }
+
+      const exists = await usersCollection.findOne({ email });
+      if (exists) {
+        return res.status(409).send({ message: "Staff already exists" });
+      }
+
+      //  Firebase user create
+      const firebaseUser = await admin.auth().createUser({ email, password, displayName, photoURL });
+
+      //  Save to DB
+      const staff = {
+        email,
+        displayName,
+        phone,
+        photoURL,
+        role: "staff",
+        createdAt: new Date(),
+      };
+
+      await usersCollection.insertOne(staff);
+
+      res.send({ success: true });
+    } catch (error) {
+      console.error("Create staff error:", error);
+
+      // 🔥 Rollback Firebase user if DB fails
+      if (req.body?.email) {
+        try {
+          const user = await admin.auth().getUserByEmail(req.body.email);
+          await admin.auth().deleteUser(user.uid);
+        } catch (e) {}
+      }
+
+      res.status(500).send({
+        message: "Failed to create staff",
+        error: error.message,
+      });
+    }
+  }
+);
+
+
+// Update Staff 
+app.patch("/admin/staff/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const email = req.params.email;
+    const { displayName, phone, photoURL } = req.body;
+
+    // 🔹 Firebase user update
+    const user = await admin.auth().getUserByEmail(email);
+
+    await admin.auth().updateUser(user.uid, {
+      displayName,
+      photoURL,
+    });
+
+    // 🔹 MongoDB update
+    const result = await usersCollection.updateOne(
+      { email },
+      {
+        $set: {
+          displayName,
+          phone,
+          photoURL,
+        },
+      }
+    );
+
+    res.send({ success: true, result });
+  } catch (error) {
+    console.error("Update staff error:", error);
+    res.status(500).send({ message: "Failed to update staff" });
+  }
+});
+
+
+// Delete Staf
+app.delete(
+  "/admin/staff/:email",
+  verifyFirebaseToken,
+  verifyAdmin,
+  async (req, res) => {
+    const email = req.params.email;
+
+    const result = await usersCollection.deleteOne({ email });
+    res.send(result);
+  }
+);
+
+
+
+    // Issues Rejact API
+    app.patch("/admin/issues/reject/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const { id } = req.params;
+      const issue = await issuesCollaction.findOne({ _id: new ObjectId(id) });
+
+      if (issue.status !== "pending") {
+        return res
+          .status(400)
+          .send({ message: "Only pending issues can be rejected" });
+      }
+
+      const result = await issuesCollaction.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: { status: "rejected" },
+          $push: {
+            timeline: {
+              status: "rejected",
+              message: "Issue rejected by admin",
+              updatedBy: "admin",
+              date: new Date(),
+            },
+          },
+        }
+      );
+
+      res.send(result);
+    }
     );
 
 
