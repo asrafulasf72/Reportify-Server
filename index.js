@@ -420,6 +420,53 @@ async function run() {
       }
     });
 
+    // Update staff profile
+app.patch("/staff/profile", verifyFirebaseToken, async (req, res) => {
+  try {
+    const email = req.decodedEmail;
+    const { displayName, photoURL } = req.body;
+
+    const user = await usersCollection.findOne({ email });
+    if (!user || user.role !== "staff") {
+      return res.status(403).send({ message: "Staff access only" });
+    }
+
+    // Update Firebase
+    const firebaseUser = await admin.auth().getUserByEmail(email);
+    await admin.auth().updateUser(firebaseUser.uid, {
+      displayName,
+      photoURL,
+    });
+
+    // Update MongoDB
+    const result = await usersCollection.updateOne(
+      { email },
+      { $set: { displayName, photoURL } }
+    );
+
+    res.send({ success: true, result });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Profile update failed" });
+  }
+});
+
+// Get staff profile
+app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
+  try {
+    const email = req.decodedEmail;
+
+    const user = await usersCollection.findOne({ email });
+    if (!user || user.role !== "staff") {
+      return res.status(403).send({ message: "Staff access only" });
+    }
+
+    res.send(user);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to load profile" });
+  }
+});
+
     // Assign issue to staff
     app.patch("/admin/issues/assign/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const { id } = req.params;
@@ -970,6 +1017,55 @@ app.get("/citizen/dashboard-stats", verifyFirebaseToken, async (req, res) => {
     res.status(500).send({ message: "Failed to load dashboard stats" });
   }
 });
+
+// ================= STAFF DASHBOARD STATS =================
+app.get("/staff/dashboard-stats", verifyFirebaseToken, async (req, res) => {
+  try {
+    const email = req.decodedEmail;
+
+    const user = await usersCollection.findOne({ email });
+    if (!user || user.role !== "staff") {
+      return res.status(403).send({ message: "Staff access only" });
+    }
+
+    const totalAssigned = await issuesCollaction.countDocuments({
+      assignedStaff: email,
+    });
+
+    const resolvedCount = await issuesCollaction.countDocuments({
+      assignedStaff: email,
+      status: "resolved",
+    });
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayTasks = await issuesCollaction.countDocuments({
+      assignedStaff: email,
+      createdAt: { $gte: todayStart },
+    });
+
+    const statusStats = await issuesCollaction.aggregate([
+      { $match: { assignedStaff: email } },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+    ]).toArray();
+
+    res.send({
+      totalAssigned,
+      resolvedCount,
+      todayTasks,
+      statusStats,
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to load staff dashboard stats" });
+  }
+});
+
 
 
     // Send a ping to confirm a successful connection
