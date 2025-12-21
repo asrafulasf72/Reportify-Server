@@ -926,6 +926,52 @@ async function run() {
       }
     );
 
+    // ================= CITIZEN DASHBOARD STATS =================
+app.get("/citizen/dashboard-stats", verifyFirebaseToken, async (req, res) => {
+  try {
+    const email = req.decodedEmail;
+
+    const totalIssues = await issuesCollaction.countDocuments({
+      citizenEmail: email,
+    });
+
+    const pendingIssues = await issuesCollaction.countDocuments({
+      citizenEmail: email,
+      status: "pending",
+    });
+
+    const inProgressIssues = await issuesCollaction.countDocuments({
+      citizenEmail: email,
+      status: "in-progress",
+    });
+
+    const resolvedIssues = await issuesCollaction.countDocuments({
+      citizenEmail: email,
+      status: "resolved",
+    });
+
+    const payments = await paymentsCollection
+      .find({ email })
+      .toArray();
+
+    const totalPayments = payments.reduce(
+      (sum, p) => sum + Number(p.amount || 0),
+      0
+    );
+
+    res.send({
+      totalIssues,
+      pendingIssues,
+      inProgressIssues,
+      resolvedIssues,
+      totalPayments,
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to load dashboard stats" });
+  }
+});
+
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
