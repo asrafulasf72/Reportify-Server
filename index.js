@@ -69,6 +69,18 @@ async function run() {
 
       next();
     };
+    /** Staff Verify Middleware */
+    const verifyStaff = async (req, res, next) => {
+      const email = req.decodedEmail;
+
+      const user = await usersCollection.findOne({ email });
+
+      if (!user || user.role !== "staff") {
+        return res.status(403).send({ message: "Staff access only" });
+      }
+
+      next();
+    };
 
     // USers API Here 
     app.post('/users', async (req, res) => {
@@ -421,77 +433,77 @@ async function run() {
     });
 
     // Update staff profile
-app.patch("/staff/profile", verifyFirebaseToken, async (req, res) => {
-  try {
-    const email = req.decodedEmail;
-    const { displayName, photoURL } = req.body;
+    app.patch("/staff/profile", verifyFirebaseToken, verifyStaff, async (req, res) => {
+      try {
+        const email = req.decodedEmail;
+        const { displayName, photoURL } = req.body;
 
-    const user = await usersCollection.findOne({ email });
-    if (!user || user.role !== "staff") {
-      return res.status(403).send({ message: "Staff access only" });
-    }
+        const user = await usersCollection.findOne({ email });
+        if (!user || user.role !== "staff") {
+          return res.status(403).send({ message: "Staff access only" });
+        }
 
-    // Update Firebase
-    const firebaseUser = await admin.auth().getUserByEmail(email);
-    await admin.auth().updateUser(firebaseUser.uid, {
-      displayName,
-      photoURL,
+        // Update Firebase
+        const firebaseUser = await admin.auth().getUserByEmail(email);
+        await admin.auth().updateUser(firebaseUser.uid, {
+          displayName,
+          photoURL,
+        });
+
+        // Update MongoDB
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: { displayName, photoURL } }
+        );
+
+        res.send({ success: true, result });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Profile update failed" });
+      }
     });
 
-    // Update MongoDB
-    const result = await usersCollection.updateOne(
-      { email },
-      { $set: { displayName, photoURL } }
-    );
+    // Get admin profile
+    app.get("/admin/profile", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const email = req.decodedEmail;
+      const adminUser = await usersCollection.findOne({ email });
+      res.send(adminUser);
+    });
 
-    res.send({ success: true, result });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: "Profile update failed" });
-  }
-});
+    // Update admin profile
+    app.patch("/admin/profile", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const email = req.decodedEmail;
+      const { displayName, photoURL } = req.body;
 
-// Get admin profile
-app.get("/admin/profile", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-  const email = req.decodedEmail;
-  const adminUser = await usersCollection.findOne({ email });
-  res.send(adminUser);
-});
+      const firebaseUser = await admin.auth().getUserByEmail(email);
+      await admin.auth().updateUser(firebaseUser.uid, {
+        displayName,
+        photoURL,
+      });
 
-// Update admin profile
-app.patch("/admin/profile", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-  const email = req.decodedEmail;
-  const { displayName, photoURL } = req.body;
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: { displayName, photoURL } }
+      );
 
-  const firebaseUser = await admin.auth().getUserByEmail(email);
-  await admin.auth().updateUser(firebaseUser.uid, {
-    displayName,
-    photoURL,
-  });
+      res.send({ success: true, result });
+    });
 
-  const result = await usersCollection.updateOne(
-    { email },
-    { $set: { displayName, photoURL } }
-  );
+    // Get staff profile
+    app.get("/staff/profile", verifyFirebaseToken, verifyStaff, async (req, res) => {
+      try {
+        const email = req.decodedEmail;
 
-  res.send({ success: true, result });
-});
+        const user = await usersCollection.findOne({ email });
+        if (!user || user.role !== "staff") {
+          return res.status(403).send({ message: "Staff access only" });
+        }
 
-// Get staff profile
-app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
-  try {
-    const email = req.decodedEmail;
-
-    const user = await usersCollection.findOne({ email });
-    if (!user || user.role !== "staff") {
-      return res.status(403).send({ message: "Staff access only" });
-    }
-
-    res.send(user);
-  } catch (error) {
-    res.status(500).send({ message: "Failed to load profile" });
-  }
-});
+        res.send(user);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load profile" });
+      }
+    });
 
     // Assign issue to staff
     app.patch("/admin/issues/assign/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
@@ -525,7 +537,7 @@ app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
     );
 
     // Staff: get assigned issues
-    app.get("/staff/assigned-issues", verifyFirebaseToken, async (req, res) => {
+    app.get("/staff/assigned-issues", verifyFirebaseToken, verifyStaff, async (req, res) => {
       const email = req.decodedEmail;
 
       const user = await usersCollection.findOne({ email });
@@ -550,7 +562,7 @@ app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
     );
 
     // Staff: change issue status
-    app.patch("/staff/issues/status/:id", verifyFirebaseToken, async (req, res) => {
+    app.patch("/staff/issues/status/:id", verifyFirebaseToken, verifyStaff, async (req, res) => {
       const email = req.decodedEmail;
       const { id } = req.params;
       const { status } = req.body;
@@ -605,11 +617,7 @@ app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
 
 
     // Delete Staf
-    app.delete(
-      "/admin/staff/:email",
-      verifyFirebaseToken,
-      verifyAdmin,
-      async (req, res) => {
+    app.delete("/admin/staff/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
         const email = req.params.email;
 
         const result = await usersCollection.deleteOne({ email });
@@ -651,8 +659,7 @@ app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
 
     /**Admin Get Users API  Here*/
     // Get all citizen users (Admin)
-    app.get("/admin/users", verifyFirebaseToken, verifyAdmin,
-      async (req, res) => {
+    app.get("/admin/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
         const users = await usersCollection
           .find({ role: "citizen" })
           .sort({ createdAt: -1 })
@@ -664,8 +671,7 @@ app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
 
 
     // Block / Unblock user
-    app.patch("/admin/users/block/:email", verifyFirebaseToken, verifyAdmin,
-      async (req, res) => {
+    app.patch("/admin/users/block/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
         const email = req.params.email;
         const { isBlocked } = req.body;
 
@@ -923,176 +929,174 @@ app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
 
     // ================= ADMIN DASHBOARD STATS =================
     app.get("/admin/dashboard-stats", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-        try {
-          const totalIssues = await issuesCollaction.countDocuments();
+      try {
+        const totalIssues = await issuesCollaction.countDocuments();
 
-          const pendingIssues = await issuesCollaction.countDocuments({
-            status: "pending",
-          });
+        const pendingIssues = await issuesCollaction.countDocuments({
+          status: "pending",
+        });
 
-          const resolvedIssues = await issuesCollaction.countDocuments({
-            status: "resolved",
-          });
+        const resolvedIssues = await issuesCollaction.countDocuments({
+          status: "resolved",
+        });
 
-          const rejectedIssues = await issuesCollaction.countDocuments({
-            status: "rejected",
-          });
+        const rejectedIssues = await issuesCollaction.countDocuments({
+          status: "rejected",
+        });
 
-          // Total payment
-          const payments = await paymentsCollection.find().toArray();
-          const totalRevenue = payments.reduce(
-            (sum, p) => sum + Number(p.amount || 0),
-            0
-          );
+        // Total payment
+        const payments = await paymentsCollection.find().toArray();
+        const totalRevenue = payments.reduce(
+          (sum, p) => sum + Number(p.amount || 0),
+          0
+        );
 
-          // Latest data
-          const latestIssues = await issuesCollaction
-            .find()
-            .sort({ createdAt: -1 })
-            .limit(5)
-            .toArray();
-
-          const latestPayments = await paymentsCollection
-            .find()
-            .sort({ createdAt: -1 })
-            .limit(5)
-            .toArray();
-
-          const latestUsers = await usersCollection
-            .find({ role: "citizen" })
-            .sort({ createdAt: -1 })
-            .limit(5)
-            .toArray();
-
-          res.send({
-            stats: {
-              totalIssues,
-              pendingIssues,
-              resolvedIssues,
-              rejectedIssues,
-              totalRevenue,
-            },
-            latestIssues,
-            latestPayments,
-            latestUsers,
-          });
-        } catch (error) {
-          res.status(500).send({ message: "Failed to load dashboard stats" });
-        }
-      }
-    );
-
-    app.get("/admin/payment-chart", verifyFirebaseToken, verifyAdmin,async (req, res) => {
-        const result = await paymentsCollection
-          .aggregate([
-            {
-              $group: {
-                _id: { month: "$month", year: "$year" },
-                total: { $sum: "$amount" },
-              },
-            },
-            { $sort: { "_id.year": 1, "_id.month": 1 } },
-          ])
+        // Latest data
+        const latestIssues = await issuesCollaction
+          .find()
+          .sort({ createdAt: -1 })
+          .limit(5)
           .toArray();
 
-        res.send(result);
+        const latestPayments = await paymentsCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .toArray();
+
+        const latestUsers = await usersCollection
+          .find({ role: "citizen" })
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .toArray();
+
+        res.send({
+          stats: {
+            totalIssues,
+            pendingIssues,
+            resolvedIssues,
+            rejectedIssues,
+            totalRevenue,
+          },
+          latestIssues,
+          latestPayments,
+          latestUsers,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load dashboard stats" });
       }
+    }
+    );
+
+    app.get("/admin/payment-chart", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const result = await paymentsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: { month: "$month", year: "$year" },
+              total: { $sum: "$amount" },
+            },
+          },
+          { $sort: { "_id.year": 1, "_id.month": 1 } },
+        ])
+        .toArray();
+
+      res.send(result);
+    }
     );
 
     // ================= CITIZEN DASHBOARD STATS =================
-app.get("/citizen/dashboard-stats", verifyFirebaseToken, async (req, res) => {
-  try {
-    const email = req.decodedEmail;
+    app.get("/citizen/dashboard-stats", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = req.decodedEmail;
 
-    const totalIssues = await issuesCollaction.countDocuments({
-      citizenEmail: email,
+        const totalIssues = await issuesCollaction.countDocuments({
+          citizenEmail: email,
+        });
+
+        const pendingIssues = await issuesCollaction.countDocuments({
+          citizenEmail: email,
+          status: "pending",
+        });
+
+        const inProgressIssues = await issuesCollaction.countDocuments({
+          citizenEmail: email,
+          status: "in-progress",
+        });
+
+        const resolvedIssues = await issuesCollaction.countDocuments({
+          citizenEmail: email,
+          status: "resolved",
+        });
+
+        const payments = await paymentsCollection
+          .find({ email })
+          .toArray();
+
+        const totalPayments = payments.reduce(
+          (sum, p) => sum + Number(p.amount || 0),
+          0
+        );
+
+        res.send({
+          totalIssues,
+          pendingIssues,
+          inProgressIssues,
+          resolvedIssues,
+          totalPayments,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load dashboard stats" });
+      }
     });
 
-    const pendingIssues = await issuesCollaction.countDocuments({
-      citizenEmail: email,
-      status: "pending",
+    // ================= STAFF DASHBOARD STATS =================
+    app.get("/staff/dashboard-stats", verifyFirebaseToken, verifyStaff, async (req, res) => {
+      try {
+        const email = req.decodedEmail;
+
+        const user = await usersCollection.findOne({ email });
+        if (!user || user.role !== "staff") {
+          return res.status(403).send({ message: "Staff access only" });
+        }
+
+        const totalAssigned = await issuesCollaction.countDocuments({
+          assignedStaff: email,
+        });
+
+        const resolvedCount = await issuesCollaction.countDocuments({
+          assignedStaff: email,
+          status: "resolved",
+        });
+
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const todayTasks = await issuesCollaction.countDocuments({
+          assignedStaff: email,
+          createdAt: { $gte: todayStart },
+        });
+
+        const statusStats = await issuesCollaction.aggregate([
+          { $match: { assignedStaff: email } },
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+            },
+          },
+        ]).toArray();
+
+        res.send({
+          totalAssigned,
+          resolvedCount,
+          todayTasks,
+          statusStats,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load staff dashboard stats" });
+      }
     });
-
-    const inProgressIssues = await issuesCollaction.countDocuments({
-      citizenEmail: email,
-      status: "in-progress",
-    });
-
-    const resolvedIssues = await issuesCollaction.countDocuments({
-      citizenEmail: email,
-      status: "resolved",
-    });
-
-    const payments = await paymentsCollection
-      .find({ email })
-      .toArray();
-
-    const totalPayments = payments.reduce(
-      (sum, p) => sum + Number(p.amount || 0),
-      0
-    );
-
-    res.send({
-      totalIssues,
-      pendingIssues,
-      inProgressIssues,
-      resolvedIssues,
-      totalPayments,
-    });
-  } catch (error) {
-    res.status(500).send({ message: "Failed to load dashboard stats" });
-  }
-});
-
-// ================= STAFF DASHBOARD STATS =================
-app.get("/staff/dashboard-stats", verifyFirebaseToken, async (req, res) => {
-  try {
-    const email = req.decodedEmail;
-
-    const user = await usersCollection.findOne({ email });
-    if (!user || user.role !== "staff") {
-      return res.status(403).send({ message: "Staff access only" });
-    }
-
-    const totalAssigned = await issuesCollaction.countDocuments({
-      assignedStaff: email,
-    });
-
-    const resolvedCount = await issuesCollaction.countDocuments({
-      assignedStaff: email,
-      status: "resolved",
-    });
-
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const todayTasks = await issuesCollaction.countDocuments({
-      assignedStaff: email,
-      createdAt: { $gte: todayStart },
-    });
-
-    const statusStats = await issuesCollaction.aggregate([
-      { $match: { assignedStaff: email } },
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 },
-        },
-      },
-    ]).toArray();
-
-    res.send({
-      totalAssigned,
-      resolvedCount,
-      todayTasks,
-      statusStats,
-    });
-  } catch (error) {
-    res.status(500).send({ message: "Failed to load staff dashboard stats" });
-  }
-});
-
-
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
