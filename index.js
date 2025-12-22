@@ -944,6 +944,8 @@ async function run() {
           status: "rejected",
         });
 
+        const totalUsers = await usersCollection.countDocuments({role:"citizen"});
+
         // Total payment
         const payments = await paymentsCollection.find().toArray();
         const totalRevenue = payments.reduce(
@@ -977,6 +979,7 @@ async function run() {
             resolvedIssues,
             rejectedIssues,
             totalRevenue,
+            totalUsers
           },
           latestIssues,
           latestPayments,
