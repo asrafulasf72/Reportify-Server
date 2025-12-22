@@ -451,6 +451,32 @@ app.patch("/staff/profile", verifyFirebaseToken, async (req, res) => {
   }
 });
 
+// Get admin profile
+app.get("/admin/profile", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  const email = req.decodedEmail;
+  const adminUser = await usersCollection.findOne({ email });
+  res.send(adminUser);
+});
+
+// Update admin profile
+app.patch("/admin/profile", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  const email = req.decodedEmail;
+  const { displayName, photoURL } = req.body;
+
+  const firebaseUser = await admin.auth().getUserByEmail(email);
+  await admin.auth().updateUser(firebaseUser.uid, {
+    displayName,
+    photoURL,
+  });
+
+  const result = await usersCollection.updateOne(
+    { email },
+    { $set: { displayName, photoURL } }
+  );
+
+  res.send({ success: true, result });
+});
+
 // Get staff profile
 app.get("/staff/profile", verifyFirebaseToken, async (req, res) => {
   try {
