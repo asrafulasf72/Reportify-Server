@@ -272,6 +272,21 @@ async function run() {
       }
     });
 
+    // Latest Resolved Issues (PUBLIC)
+    app.get("/public/issues/latest-resolved", async (req, res) => {
+      try {
+        const issues = await issuesCollaction
+          .find({ status: "resolved" })
+          .sort({ createdAt: -1 })
+          .limit(6)
+          .toArray();
+
+        res.send(issues);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load resolved issues" });
+      }
+    });
+
 
     // Issues Update 
 
@@ -382,7 +397,7 @@ async function run() {
       } catch (error) {
         console.error("Create staff error:", error);
 
-        // 🔥 Rollback Firebase user if DB fails
+        //  Rollback Firebase user if DB fails
         if (req.body?.email) {
           try {
             const user = await admin.auth().getUserByEmail(req.body.email);
@@ -618,11 +633,11 @@ async function run() {
 
     // Delete Staf
     app.delete("/admin/staff/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-        const email = req.params.email;
+      const email = req.params.email;
 
-        const result = await usersCollection.deleteOne({ email });
-        res.send(result);
-      }
+      const result = await usersCollection.deleteOne({ email });
+      res.send(result);
+    }
     );
 
 
@@ -660,28 +675,28 @@ async function run() {
     /**Admin Get Users API  Here*/
     // Get all citizen users (Admin)
     app.get("/admin/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-        const users = await usersCollection
-          .find({ role: "citizen" })
-          .sort({ createdAt: -1 })
-          .toArray();
+      const users = await usersCollection
+        .find({ role: "citizen" })
+        .sort({ createdAt: -1 })
+        .toArray();
 
-        res.send(users);
-      }
+      res.send(users);
+    }
     );
 
 
     // Block / Unblock user
     app.patch("/admin/users/block/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-        const email = req.params.email;
-        const { isBlocked } = req.body;
+      const email = req.params.email;
+      const { isBlocked } = req.body;
 
-        const result = await usersCollection.updateOne(
-          { email },
-          { $set: { isBlocked } }
-        );
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: { isBlocked } }
+      );
 
-        res.send(result);
-      }
+      res.send(result);
+    }
     );
 
     /****************************************************************************************/
@@ -944,7 +959,7 @@ async function run() {
           status: "rejected",
         });
 
-        const totalUsers = await usersCollection.countDocuments({role:"citizen"});
+        const totalUsers = await usersCollection.countDocuments({ role: "citizen" });
 
         // Total payment
         const payments = await paymentsCollection.find().toArray();
@@ -1100,6 +1115,29 @@ async function run() {
         res.status(500).send({ message: "Failed to load staff dashboard stats" });
       }
     });
+
+    //  CITIZEN PAYMENTS (Invoice)
+    app.get("/payments/citizen", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = req.query.email;
+
+        if (email !== req.decodedEmail) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+
+        const payments = await paymentsCollection
+          .find({ email })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.send(payments);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load payments" });
+      }
+    }
+    );
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
